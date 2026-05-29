@@ -1,0 +1,172 @@
+# Docker Compose 配置文件
+# 闲鱼自动回复系统 - 使用外部MySQL和Redis，本地源码构建
+# 用法: docker compose up -d --build
+
+services:
+  # ====== 应用服务（不包含MySQL和Redis，使用外部的） ======
+
+  # Backend-Web 服务
+  backend-web:
+    build:
+      context: ..
+      dockerfile: backend-web/Dockerfile
+    container_name: xianyu-backend-web
+    restart: unless-stopped
+    environment:
+      - ENVIRONMENT=production
+      - MYSQL_HOST=${MYSQL_HOST}
+      - MYSQL_PORT=${MYSQL_PORT}
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_DB=${REDIS_DB}
+      - BACKEND_WEB_PORT=${BACKEND_WEB_PORT}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - JWT_ALGORITHM=HS256
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES}
+      - REFRESH_TOKEN_EXPIRE_MINUTES=${REFRESH_TOKEN_EXPIRE_MINUTES}
+      - CORS_ORIGINS=*
+      - WEBSOCKET_SERVICE_URL=http://websocket:${WEBSOCKET_PORT}
+      - SCHEDULER_SERVICE_URL=http://scheduler:${SCHEDULER_PORT}
+      - STATIC_DIR=/app/static
+      - BACKEND_WEB_PUBLIC_URL=
+      - BROWSER_HEADLESS=true
+      - LOG_LEVEL=${LOG_LEVEL}
+      - TZ=${TZ}
+    volumes:
+      - backend_web_logs:/app/backend-web/logs
+      - static-files:/app/static
+    ports:
+      - "${BACKEND_WEB_PORT}:8089"
+    networks:
+      - xianyu-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8089/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # WebSocket 服务
+  websocket:
+    build:
+      context: ..
+      dockerfile: websocket/Dockerfile
+    container_name: xianyu-websocket
+    restart: unless-stopped
+    environment:
+      - ENVIRONMENT=production
+      - MYSQL_HOST=${MYSQL_HOST}
+      - MYSQL_PORT=${MYSQL_PORT}
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_DB=${REDIS_DB}
+      - WEBSOCKET_PORT=${WEBSOCKET_PORT}
+      - MAX_CAPTCHA_CONCURRENT=${MAX_CAPTCHA_CONCURRENT}
+      - BROWSER_HEADLESS=true
+      - BACKEND_WEB_SERVICE_URL=http://backend-web:${BACKEND_WEB_PORT}
+      - STATIC_DIR=/app/static
+      - LOG_LEVEL=${LOG_LEVEL}
+      - TZ=${TZ}
+    volumes:
+      - websocket_logs:/app/websocket/logs
+      - static-files:/app/static
+      - browser_data:/app/browser_data
+    ports:
+      - "${WEBSOCKET_PORT}:8090"
+    networks:
+      - xianyu-network
+    depends_on:
+      backend-web:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Scheduler 服务
+  scheduler:
+    build:
+      context: ..
+      dockerfile: scheduler/Dockerfile
+    container_name: xianyu-scheduler
+    restart: unless-stopped
+    environment:
+      - ENVIRONMENT=production
+      - MYSQL_HOST=${MYSQL_HOST}
+      - MYSQL_PORT=${MYSQL_PORT}
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_DB=${REDIS_DB}
+      - SCHEDULER_PORT=${SCHEDULER_PORT}
+      - REDELIVERY_INTERVAL=${REDELIVERY_INTERVAL}
+      - RATE_INTERVAL=${RATE_INTERVAL}
+      - WEBSOCKET_SERVICE_URL=http://websocket:${WEBSOCKET_PORT}
+      - BACKEND_WEB_SERVICE_URL=http://backend-web:${BACKEND_WEB_PORT}
+      - STATIC_DIR=/app/static
+      - LOG_LEVEL=${LOG_LEVEL}
+      - TZ=${TZ}
+    volumes:
+      - scheduler_logs:/app/scheduler/logs
+      - static-files:/app/static:ro
+    ports:
+      - "${SCHEDULER_PORT}:8091"
+    networks:
+      - xianyu-network
+    depends_on:
+      websocket:
+        condition: service_healthy
+      backend-web:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8091/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # 前端服务
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/frontend/Dockerfile
+    container_name: xianyu-frontend
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ}
+    ports:
+      - "${FRONTEND_PORT}:80"
+    networks:
+      - xianyu-network
+    depends_on:
+      backend-web:
+        condition: service_healthy
+
+networks:
+  xianyu-network:
+    driver: bridge
+
+volumes:
+  websocket_logs:
+    driver: local
+  backend_web_logs:
+    driver: local
+  scheduler_logs:
+    driver: local
+  static-files:
+    driver: local
+  browser_data:
+    driver: local
